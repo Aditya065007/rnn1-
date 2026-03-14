@@ -1,8 +1,3 @@
-# ── Fixes applied ─────────────────────────────────────────────────
-# ROOT CAUSE: GitHub corrupts binary .h5/.pkl files (\x0d error)
-# FIX: Files hosted on Google Drive, downloaded at startup via gdown
-# No binary files in GitHub repo at all.
-
 import streamlit as st
 import numpy as np
 import re
@@ -22,27 +17,24 @@ EMBEDDING_DIM       = 100
 LSTM_UNITS          = 64
 DROPOUT_RATE        = 0.5
 
-# ── Download model files from Google Drive if not already present ─
 os.makedirs("models", exist_ok=True)
 
-WEIGHTS_ID   = "18XUT9YKVeyDRZ91bL-LAwft5p5C8veo8"
-TOKENIZER_ID = "1kunztOgHS8Yoy78BWcXlVgoy3fjWInCg"
-
+WEIGHTS_ID     = "18XUT9YKVeyDRZ91bL-LAwft5p5C8veo8"
+TOKENIZER_ID   = "1kunztOgHS8Yoy78BWcXlVgoy3fjWInCg"
 WEIGHTS_PATH   = "models/bilstm_weights.weights.h5"
 TOKENIZER_PATH = "models/tokenizer.pkl"
 
 def download_files():
     import gdown
     if not os.path.exists(WEIGHTS_PATH):
-        with st.spinner("Downloading model weights from Google Drive..."):
+        with st.spinner("Downloading model weights..."):
             gdown.download(id=WEIGHTS_ID, output=WEIGHTS_PATH, quiet=False)
     if not os.path.exists(TOKENIZER_PATH):
-        with st.spinner("Downloading tokenizer from Google Drive..."):
+        with st.spinner("Downloading tokenizer..."):
             gdown.download(id=TOKENIZER_ID, output=TOKENIZER_PATH, quiet=False)
 
 download_files()
 
-# ── Load model by rebuilding architecture + loading weights ───────
 @st.cache_resource
 def load_model():
     import tensorflow as tf
@@ -76,8 +68,22 @@ def load_model():
 
 @st.cache_resource
 def load_tokenizer():
+    # Keras 3 pickled tokenizer references keras.src.legacy which does not
+    # exist in tensorflow==2.15.0 (Keras 2). We re-create the tokenizer
+    # from scratch using only its word_index — no legacy import needed.
+    import tensorflow as tf
+
     with open(TOKENIZER_PATH, "rb") as f:
-        return pickle.load(f)
+        old_tok = pickle.load(f)
+
+    new_tok = tf.keras.preprocessing.text.Tokenizer(
+        num_words=25000,
+        oov_token='<OOV>'
+    )
+    # Copy word_index directly — this is all we need for inference
+    new_tok.word_index = old_tok.word_index
+    new_tok.index_word = {v: k for k, v in old_tok.word_index.items()}
+    return new_tok
 
 @st.cache_resource
 def load_cleaning_tools():
@@ -90,7 +96,6 @@ def load_cleaning_tools():
     sw  = set(stopwords.words('english')) - {'not', 'no', 'never', 'nor'}
     return lem, sw
 
-# ── Regex compiled once ───────────────────────────────────────────
 html_pat    = re.compile(r'<.*?>')
 url_pat     = re.compile(r'http\S+|www\.\S+')
 email_pat   = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b')
