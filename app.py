@@ -1,8 +1,7 @@
 # ── Fixes applied ─────────────────────────────────────────────────
-# ROOT CAUSE: Model saved in Keras 3 (Colab) cannot be deserialized
-#             by Keras 2 (tensorflow==2.15.0 on Streamlit Cloud).
-# FIX: Rebuild model architecture in app.py, then load weights only.
-#      Weights are format-agnostic — no config deserialization needed.
+# ROOT CAUSE: GitHub corrupts binary .h5/.pkl files (\x0d error)
+# FIX: Files hosted on Google Drive, downloaded at startup via gdown
+# No binary files in GitHub repo at all.
 
 import streamlit as st
 import numpy as np
@@ -17,13 +16,33 @@ st.set_page_config(
     layout="centered"
 )
 
-# Must match notebook Cell 9 — fixed notebook = 200, original = 150
 MAX_SEQUENCE_LENGTH = 200
 VOCAB_SIZE          = 25000
 EMBEDDING_DIM       = 100
 LSTM_UNITS          = 64
 DROPOUT_RATE        = 0.5
 
+# ── Download model files from Google Drive if not already present ─
+os.makedirs("models", exist_ok=True)
+
+WEIGHTS_ID   = "18XUT9YKVeyDRZ91bL-LAwft5p5C8veo8"
+TOKENIZER_ID = "1kunztOgHS8Yoy78BWcXlVgoy3fjWInCg"
+
+WEIGHTS_PATH   = "models/bilstm_weights.weights.h5"
+TOKENIZER_PATH = "models/tokenizer.pkl"
+
+def download_files():
+    import gdown
+    if not os.path.exists(WEIGHTS_PATH):
+        with st.spinner("Downloading model weights from Google Drive..."):
+            gdown.download(id=WEIGHTS_ID, output=WEIGHTS_PATH, quiet=False)
+    if not os.path.exists(TOKENIZER_PATH):
+        with st.spinner("Downloading tokenizer from Google Drive..."):
+            gdown.download(id=TOKENIZER_ID, output=TOKENIZER_PATH, quiet=False)
+
+download_files()
+
+# ── Load model by rebuilding architecture + loading weights ───────
 @st.cache_resource
 def load_model():
     import tensorflow as tf
@@ -32,7 +51,6 @@ def load_model():
                                          LSTM, Dense, Dropout, SpatialDropout1D)
     from tensorflow.keras.regularizers import l2
 
-    # Rebuild exact architecture from notebook Cell 9
     inp = Input(shape=(MAX_SEQUENCE_LENGTH,), name='Input')
     x   = Embedding(input_dim=VOCAB_SIZE, output_dim=EMBEDDING_DIM,
                     trainable=False, name='GloVe_Embedding')(inp)
@@ -53,14 +71,12 @@ def load_model():
     model.compile(optimizer='adam',
                   loss='categorical_crossentropy',
                   metrics=['accuracy'])
-
-    # Load weights only — no config deserialization, no Keras version conflict
-    model.load_weights("models/bilstm_weights.weights.h5")
+    model.load_weights(WEIGHTS_PATH)
     return model
 
 @st.cache_resource
 def load_tokenizer():
-    with open("models/tokenizer.pkl", "rb") as f:
+    with open(TOKENIZER_PATH, "rb") as f:
         return pickle.load(f)
 
 @st.cache_resource
@@ -74,7 +90,7 @@ def load_cleaning_tools():
     sw  = set(stopwords.words('english')) - {'not', 'no', 'never', 'nor'}
     return lem, sw
 
-# Regex compiled once at module level
+# ── Regex compiled once ───────────────────────────────────────────
 html_pat    = re.compile(r'<.*?>')
 url_pat     = re.compile(r'http\S+|www\.\S+')
 email_pat   = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b')
@@ -126,14 +142,6 @@ with st.spinner("Loading model and NLP tools..."):
         tokenizer = load_tokenizer()
         lem, sw   = load_cleaning_tools()
         st.success("✅ Model loaded successfully!")
-    except FileNotFoundError as e:
-        st.error(f"❌ Model file not found: {e}")
-        st.info(
-            "**Setup required:**\n\n"
-            "1. Run the updated save cell in Colab — saves `bilstm_weights.weights.h5`\n"
-            "2. Upload `bilstm_weights.weights.h5` and `tokenizer.pkl` to the `models/` folder in GitHub"
-        )
-        st.stop()
     except Exception as e:
         st.error(f"❌ Unexpected error while loading: {e}")
         st.stop()
