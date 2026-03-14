@@ -1,12 +1,10 @@
-# ── Compliance fixes applied ──────────────────────────────────────
-# 1. Folder name fixed        → looks in 'models/' (not 'model/')
-# 2. KeyError 'cleaned_text'  → safe empty-string guard in clean_text()
-# 3. KeyError 'review/text'   → app never touches df_sampled columns
-# 4. GloVe re-download        → app loads .h5 directly, no GloVe needed
-# 5. NLTK punkt_tab missing   → all 5 NLTK packages downloaded explicitly
-# 6. Out-of-order re-runs     → @st.cache_resource isolates state fully
-# 7. Shape mismatch           → MAX_SEQUENCE_LENGTH constant at top of file
-# 8. Stale example buttons    → st.session_state used throughout
+# ── Fixes applied ─────────────────────────────────────────────────
+# 1. Keras deserialization error  → load .keras format not .h5
+# 2. batch_shape/optional error   → .keras format handles this natively
+# 3. Folder = models/ (plural)    → matches GitHub repo structure
+# 4. KeyError guards              → clean_text() safe on empty/None
+# 5. NLTK punkt_tab               → all 5 packages downloaded explicitly
+# 6. Session state                → example buttons work correctly
 
 import streamlit as st
 import numpy as np
@@ -15,23 +13,20 @@ import pickle
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# ── Page config ───────────────────────────────────────────────────
 st.set_page_config(
     page_title="Yelp Sentiment Analyzer",
     page_icon="⭐",
     layout="centered"
 )
 
-# ── Must match notebook Cell 9 MAX_SEQUENCE_LENGTH ───────────────
-# Fixed notebook = 200 | Original notebook = 150
-# Change this if you get shape mismatch errors
+# Must match notebook Cell 9 — fixed notebook = 200, original = 150
 MAX_SEQUENCE_LENGTH = 200
 
-# ── Load model (cached — loads only once per session) ─────────────
 @st.cache_resource
 def load_model():
     import tensorflow as tf
-    model = tf.keras.models.load_model("models/bilstm_model.h5")
+    # .keras format avoids batch_shape/optional deserialization error
+    model = tf.keras.models.load_model("models/bilstm_model.keras")
     return model
 
 @st.cache_resource
@@ -39,21 +34,18 @@ def load_tokenizer():
     with open("models/tokenizer.pkl", "rb") as f:
         return pickle.load(f)
 
-# ── NLTK tools — all 5 packages, matches Cell 4 exactly ──────────
 @st.cache_resource
 def load_cleaning_tools():
     import nltk
     from nltk.stem import WordNetLemmatizer
     from nltk.corpus import stopwords
-
     for pkg in ['stopwords', 'wordnet', 'omw-1.4', 'punkt', 'punkt_tab']:
         nltk.download(pkg, quiet=True)
-
     lem = WordNetLemmatizer()
     sw  = set(stopwords.words('english')) - {'not', 'no', 'never', 'nor'}
     return lem, sw
 
-# ── Regex patterns compiled once at module level ──────────────────
+# Regex compiled once at module level
 html_pat    = re.compile(r'<.*?>')
 url_pat     = re.compile(r'http\S+|www\.\S+')
 email_pat   = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,7}\b')
@@ -69,10 +61,6 @@ slang_dict = {
 }
 
 def clean_text(text, lem, sw):
-    """
-    Exact replica of clean_text() from notebook Cell 4.
-    Safe guard on non-string / empty input prevents KeyErrors.
-    """
     if not isinstance(text, str) or text.strip() == "":
         return ""
     text = text.lower()
@@ -88,35 +76,21 @@ def clean_text(text, lem, sw):
     return ' '.join(words)
 
 def predict(raw_text, model, tokenizer, lem, sw):
-    """
-    raw text → clean → tokenize → pad → predict
-    padding='post', truncating='post' matches notebook Cell 8 exactly.
-    """
     from tensorflow.keras.preprocessing.sequence import pad_sequences
-
     cleaned = clean_text(raw_text, lem, sw)
-
     if not cleaned:
         return np.array([0.33, 0.34, 0.33]), cleaned
-
     seq    = tokenizer.texts_to_sequences([cleaned])
-    padded = pad_sequences(
-        seq,
-        maxlen=MAX_SEQUENCE_LENGTH,
-        padding='post',
-        truncating='post'
-    )
-    probs = model.predict(padded, verbose=0)[0]
+    padded = pad_sequences(seq, maxlen=MAX_SEQUENCE_LENGTH,
+                           padding='post', truncating='post')
+    probs  = model.predict(padded, verbose=0)[0]
     return probs, cleaned
 
-# ─────────────────────────────────────────────────────────────────
-# UI
-# ─────────────────────────────────────────────────────────────────
+# ── UI ────────────────────────────────────────────────────────────
 st.title("⭐ Yelp Review Sentiment Analyzer")
 st.markdown("Powered by **Bidirectional LSTM** trained on 45,000 Yelp reviews")
 st.markdown("---")
 
-# ── Load resources ────────────────────────────────────────────────
 with st.spinner("Loading model and NLP tools..."):
     try:
         model     = load_model()
@@ -127,16 +101,14 @@ with st.spinner("Loading model and NLP tools..."):
         st.error(f"❌ Model file not found: {e}")
         st.info(
             "**Setup required:**\n\n"
-            "1. Run `save_model.py` as the last cell in your Colab notebook\n"
-            "2. Download `bilstm_model.h5` and `tokenizer.pkl`\n"
-            "3. Place both files inside the `models/` folder in your GitHub repo"
+            "1. Run the updated `save_model.py` in Colab — saves as `.keras` format\n"
+            "2. Upload `bilstm_model.keras` and `tokenizer.pkl` to the `models/` folder in GitHub"
         )
         st.stop()
     except Exception as e:
         st.error(f"❌ Unexpected error while loading: {e}")
         st.stop()
 
-# ── Session state for example buttons ─────────────────────────────
 if "review_text" not in st.session_state:
     st.session_state["review_text"] = ""
 
@@ -171,7 +143,6 @@ col1, col2, col3 = st.columns([1, 1, 1])
 with col2:
     analyze_btn = st.button("🔍 Analyze Sentiment", use_container_width=True)
 
-# ── Prediction ────────────────────────────────────────────────────
 if analyze_btn:
     if not review_text.strip():
         st.warning("⚠️ Please enter a review before clicking Analyze.")
