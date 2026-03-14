@@ -1,10 +1,8 @@
 # ── Fixes applied ─────────────────────────────────────────────────
-# 1. Keras deserialization error  → load .keras format not .h5
-# 2. batch_shape/optional error   → .keras format handles this natively
-# 3. Folder = models/ (plural)    → matches GitHub repo structure
-# 4. KeyError guards              → clean_text() safe on empty/None
-# 5. NLTK punkt_tab               → all 5 packages downloaded explicitly
-# 6. Session state                → example buttons work correctly
+# ROOT CAUSE: Model saved in Keras 3 (Colab) cannot be deserialized
+#             by Keras 2 (tensorflow==2.15.0 on Streamlit Cloud).
+# FIX: Rebuild model architecture in app.py, then load weights only.
+#      Weights are format-agnostic — no config deserialization needed.
 
 import streamlit as st
 import numpy as np
@@ -21,12 +19,43 @@ st.set_page_config(
 
 # Must match notebook Cell 9 — fixed notebook = 200, original = 150
 MAX_SEQUENCE_LENGTH = 200
+VOCAB_SIZE          = 25000
+EMBEDDING_DIM       = 100
+LSTM_UNITS          = 64
+DROPOUT_RATE        = 0.5
 
 @st.cache_resource
 def load_model():
     import tensorflow as tf
-    # .keras format avoids batch_shape/optional deserialization error
-    model = tf.keras.models.load_model("models/bilstm_model.keras")
+    from tensorflow.keras.models import Model
+    from tensorflow.keras.layers import (Input, Embedding, Bidirectional,
+                                         LSTM, Dense, Dropout, SpatialDropout1D)
+    from tensorflow.keras.regularizers import l2
+
+    # Rebuild exact architecture from notebook Cell 9
+    inp = Input(shape=(MAX_SEQUENCE_LENGTH,), name='Input')
+    x   = Embedding(input_dim=VOCAB_SIZE, output_dim=EMBEDDING_DIM,
+                    trainable=False, name='GloVe_Embedding')(inp)
+    x   = SpatialDropout1D(0.4, name='SpatialDropout')(x)
+    x   = Bidirectional(LSTM(LSTM_UNITS, return_sequences=True,
+                              dropout=0.3, recurrent_dropout=0.2),
+                        name='Bi_LSTM_1')(x)
+    x   = Bidirectional(LSTM(32, return_sequences=False,
+                              dropout=0.3, recurrent_dropout=0.2),
+                        name='Bi_LSTM_2')(x)
+    x   = Dropout(DROPOUT_RATE, name='Dropout_1')(x)
+    x   = Dense(64, activation='relu',
+                kernel_regularizer=l2(0.001), name='Dense_1')(x)
+    x   = Dropout(DROPOUT_RATE, name='Dropout_2')(x)
+    out = Dense(3, activation='softmax', name='Output')(x)
+
+    model = Model(inputs=inp, outputs=out)
+    model.compile(optimizer='adam',
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+
+    # Load weights only — no config deserialization, no Keras version conflict
+    model.load_weights("models/bilstm_weights.weights.h5")
     return model
 
 @st.cache_resource
@@ -101,8 +130,8 @@ with st.spinner("Loading model and NLP tools..."):
         st.error(f"❌ Model file not found: {e}")
         st.info(
             "**Setup required:**\n\n"
-            "1. Run the updated `save_model.py` in Colab — saves as `.keras` format\n"
-            "2. Upload `bilstm_model.keras` and `tokenizer.pkl` to the `models/` folder in GitHub"
+            "1. Run the updated save cell in Colab — saves `bilstm_weights.weights.h5`\n"
+            "2. Upload `bilstm_weights.weights.h5` and `tokenizer.pkl` to the `models/` folder in GitHub"
         )
         st.stop()
     except Exception as e:
