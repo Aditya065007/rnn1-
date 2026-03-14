@@ -1,10 +1,12 @@
 # ── Compliance fixes applied ──────────────────────────────────────
-# 1. KeyError 'cleaned_text'  → safe empty-string guard in clean_text()
-# 2. KeyError 'review/text'   → app never touches df_sampled columns
-# 3. GloVe re-download prompt → app loads .h5 directly, no GloVe needed
-# 4. NLTK punkt_tab missing   → all 5 NLTK packages downloaded explicitly
-# 5. Out-of-order re-runs     → @st.cache_resource isolates state fully
-# 6. Shape mismatch           → MAX_SEQUENCE_LENGTH constant at top of file
+# 1. Folder name fixed        → looks in 'models/' (not 'model/')
+# 2. KeyError 'cleaned_text'  → safe empty-string guard in clean_text()
+# 3. KeyError 'review/text'   → app never touches df_sampled columns
+# 4. GloVe re-download        → app loads .h5 directly, no GloVe needed
+# 5. NLTK punkt_tab missing   → all 5 NLTK packages downloaded explicitly
+# 6. Out-of-order re-runs     → @st.cache_resource isolates state fully
+# 7. Shape mismatch           → MAX_SEQUENCE_LENGTH constant at top of file
+# 8. Stale example buttons    → st.session_state used throughout
 
 import streamlit as st
 import numpy as np
@@ -29,27 +31,25 @@ MAX_SEQUENCE_LENGTH = 200
 @st.cache_resource
 def load_model():
     import tensorflow as tf
-    model = tf.keras.models.load_model("model/bilstm_model.h5")
+    model = tf.keras.models.load_model("models/bilstm_model.h5")
     return model
 
 @st.cache_resource
 def load_tokenizer():
-    with open("model/tokenizer.pkl", "rb") as f:
+    with open("models/tokenizer.pkl", "rb") as f:
         return pickle.load(f)
 
-# ── NLTK tools — all 5 packages downloaded, matches Cell 4 exactly ─
+# ── NLTK tools — all 5 packages, matches Cell 4 exactly ──────────
 @st.cache_resource
 def load_cleaning_tools():
     import nltk
     from nltk.stem import WordNetLemmatizer
     from nltk.corpus import stopwords
 
-    # Same 5 packages as notebook Cell 4 — punkt_tab included (NLTK >= 3.8)
     for pkg in ['stopwords', 'wordnet', 'omw-1.4', 'punkt', 'punkt_tab']:
         nltk.download(pkg, quiet=True)
 
     lem = WordNetLemmatizer()
-    # Preserve negations — mirrors Cell 4 exactly
     sw  = set(stopwords.words('english')) - {'not', 'no', 'never', 'nor'}
     return lem, sw
 
@@ -71,9 +71,7 @@ slang_dict = {
 def clean_text(text, lem, sw):
     """
     Exact replica of clean_text() from notebook Cell 4.
-    Added: isinstance + empty string guard to prevent KeyError
-    when input is None, NaN, or empty — the same root cause as
-    KeyError:'cleaned_text' and KeyError:'review/text' in the notebook.
+    Safe guard on non-string / empty input prevents KeyErrors.
     """
     if not isinstance(text, str) or text.strip() == "":
         return ""
@@ -131,15 +129,14 @@ with st.spinner("Loading model and NLP tools..."):
             "**Setup required:**\n\n"
             "1. Run `save_model.py` as the last cell in your Colab notebook\n"
             "2. Download `bilstm_model.h5` and `tokenizer.pkl`\n"
-            "3. Place both files inside a `model/` folder next to `app.py`"
+            "3. Place both files inside the `models/` folder in your GitHub repo"
         )
         st.stop()
     except Exception as e:
         st.error(f"❌ Unexpected error while loading: {e}")
         st.stop()
 
-# ── Session state for example buttons ────────────────────────────
-# Fixes stale text issue when example buttons are clicked
+# ── Session state for example buttons ─────────────────────────────
 if "review_text" not in st.session_state:
     st.session_state["review_text"] = ""
 
