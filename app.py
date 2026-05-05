@@ -142,7 +142,7 @@ details { border: none !important; background: transparent !important; }
     color: rgba(13,13,13,0.45) !important;
 }
 
-.stAlert { display: none !important; }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -153,7 +153,7 @@ def download_file(file_id, output_path, label):
         import gdown
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         gdown.download(f"https://drive.google.com/uc?id={file_id}",
-                       output_path, quiet=False, fuzzy=True)
+                       output_path, quiet=False, fuzzy=True, confirm=True)
         if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
             raise ValueError("Download incomplete.")
     except Exception as e:
